@@ -169,8 +169,8 @@ def handle_round_2(game_state, market_data):
     # Update game state for round 2
     game_state.round = 2
     game_state.previous_bid = round1_bid
-    game_state.competitive_level = max(1, game_state.competitive_level - 1)
-    game_state.days_on_market += days_since
+    game_state.rental_situation['competitive_level'] = max(1, game_state.competitive_level - 1)
+    game_state.rental_situation['days_on_market'] += days_since
     
     # Generate new recommendations
     return generate_three_strategies(game_state) 
