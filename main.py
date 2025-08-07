@@ -7,7 +7,7 @@ Main entry point for terminal-based rental bidding advisor
 from algorithm.game_state import GameState
 from analysis.strategy import generate_three_strategies
 from config.market_data import load_market_data
-from config.constants import PROPERTY_VALUE_WEIGHT, OVERPAYMENT_WEIGHT
+from config.constants import PROPERTY_VALUE_WEIGHT, OVERPAYMENT_WEIGHT, BUDGET_FLEXIBILITY
 from models.market import classify_market_conditions
 from ui.terminal_ui import (
     select_market,
@@ -65,6 +65,14 @@ def main():
             validator.validate_user_preferences(user_prefs)
             validator.validate_rental_situation(rental_situation)
             print("✓")
+            
+            # Display budget flexibility
+            flexible_budget = user_prefs['max_budget'] * (1 + BUDGET_FLEXIBILITY)
+            if user_prefs['max_budget'] < rental_situation['listing_price']:
+                print(f"\nNote: Your budget is below listing price.")
+                print(f"      With {BUDGET_FLEXIBILITY:.0%} flexibility, you can bid up to ${flexible_budget:.0f}")
+            else:
+                print(f"\nNote: Algorithm may use up to ${flexible_budget:.0f} ({BUDGET_FLEXIBILITY:.0%} flexibility) if needed")
         except ValueError as e:
             print(f"\n✗ Validation Error: {e}")
             return

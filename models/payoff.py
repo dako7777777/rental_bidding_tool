@@ -11,8 +11,11 @@ def evaluate(state):
         float: Normalized payoff value between -1 and 1
     """
     if not state.won_property:
-        # Normalize losing penalty based on property value preference
-        return -0.5 * (state.property_value / 5.0)
+        # Increase losing penalty to encourage competitive bidding
+        # Penalty scales with property value (how much you want it)
+        base_penalty = -0.4  # Base penalty for losing
+        property_value_factor = state.property_value / 5.0  # 0.2 to 1.0
+        return base_penalty * (1 + property_value_factor * 0.5)  # -0.44 to -0.6 for high value properties
     
     # Calculate fair market value aligned with market data
     fair_market_value = calculate_fair_market_value(
@@ -29,8 +32,12 @@ def evaluate(state):
     # Normalize property value to 0-1 scale
     normalized_property_value = state.property_value / 5.0
     
-    # Calculate base payoff (normalized to -1 to 1 range)
-    base_payoff = normalized_property_value - (overpayment_ratio * 2.0)
+    # Calculate base payoff with weighted components
+    # Use the overpayment_weight from state (which can be adjusted per strategy)
+    overpayment_penalty = overpayment_ratio * 2.0 * state.overpayment_weight
+    property_benefit = normalized_property_value * state.property_value_weight
+    
+    base_payoff = property_benefit - overpayment_penalty
     
     # Apply risk adjustment
     risk_factor = (state.risk_tolerance - 3) / 10.0  # -0.2 to +0.2

@@ -3,7 +3,8 @@
 import numpy as np
 from models.distributions import get_competitor_bid_distribution
 from models.payoff import evaluate
-from config.constants import PROBABILITY_THRESHOLD
+from config.constants import PROBABILITY_THRESHOLD, BUDGET_FLEXIBILITY
+from models.market import classify_market_conditions
 
 def expectiminimax(node, depth, alpha, beta, maximizing_player):
     """
@@ -58,8 +59,14 @@ def expectiminimax(node, depth, alpha, beta, maximizing_player):
             # Apply competitor bid to determine win/loss
             child = apply_competitor_bid(node, competitor_bid)
             
-            # Terminal evaluation (no more depth needed for simple payoff)
-            eval_score = evaluate(child)
+            # For simple 2-player game against field, evaluate directly at terminal
+            # This is appropriate since win/loss is determined here
+            if depth <= 1 or child.won_property is not None:
+                eval_score = evaluate(child)
+            else:
+                # Continue tree exploration if more depth available
+                eval_score, _ = expectiminimax(child, depth-1, alpha, beta, True)
+            
             expected_value += probability * eval_score
             cumulative_prob += probability
             
@@ -78,7 +85,7 @@ def expectiminimax(node, depth, alpha, beta, maximizing_player):
 
 def get_possible_bids(state):
     """
-    Generate possible bid amounts for the user
+    Generate possible bid amounts for the user, centered around market reality
     
     Returns:
         list: List of bid amounts to consider
@@ -86,13 +93,58 @@ def get_possible_bids(state):
     listing_price = state.listing_price
     max_budget = state.max_budget
     
-    # Generate bid range from 85% to min(130%, budget)
-    min_bid = 0.85 * listing_price
-    max_bid = min(1.30 * listing_price, max_budget)
+    # Allow budget flexibility for competitive bidding
+    flexible_budget = max_budget * (1 + BUDGET_FLEXIBILITY)
     
-    # Create a reasonable number of bid points
-    num_bids = 15  # Fewer than competitor samples for efficiency
-    bids = np.linspace(min_bid, max_bid, num=num_bids)
+    # Get market median from parameters
+    market_median_ratio = state.market_params['parameters']['median']
+    market_median_bid = market_median_ratio * listing_price
+    
+    # Classify market conditions
+    market_condition = classify_market_conditions(state.market_params)
+    
+    # Adjust bid range based on risk tolerance
+    # Risk tolerance 1-5 maps to different strategy levels
+    risk_levels = {
+        1: {'center_offset': -0.06, 'range': 0.08},  # Very conservative: 90-98% of listing
+        2: {'center_offset': -0.04, 'range': 0.08},  # Conservative: 92-100% of listing
+        3: {'center_offset': -0.02, 'range': 0.10},  # Balanced: 94-104% of listing
+        4: {'center_offset': 0.00, 'range': 0.10},   # Aggressive: 96-106% of listing
+        5: {'center_offset': 0.02, 'range': 0.12}    # Very aggressive: 98-110% of listing
+    }
+    
+    risk_level = int(state.risk_tolerance)
+    risk_params = risk_levels.get(risk_level, risk_levels[3])  # Default to balanced
+    
+    # Center the bid range around market median, adjusted for risk
+    center_ratio = market_median_ratio + risk_params['center_offset']
+    range_width = risk_params['range']
+    
+    # Calculate bid range
+    min_ratio = center_ratio - (range_width / 2)
+    max_ratio = center_ratio + (range_width / 2)
+    
+    # Convert to actual dollar amounts
+    min_bid = max(min_ratio * listing_price, 0.85 * listing_price)  # Never go below 85%
+    max_bid = min(max_ratio * listing_price, flexible_budget)  # Respect flexible budget
+    
+    # In cooling markets, extend the lower range for conservative strategies
+    if market_condition in ['cooling', 'very_cool'] and risk_level <= 2:
+        min_bid = max(0.88 * listing_price, min_bid - 0.02 * listing_price)
+    
+    # Ensure min doesn't exceed max
+    if min_bid >= max_bid:
+        # Fallback: use a narrow range around the budget limit
+        max_bid = min(flexible_budget, listing_price * 1.05)
+        min_bid = max_bid * 0.95
+    
+    # Create bid points with more density around market median
+    num_bids = 15
+    if min_bid < max_bid:
+        # Create more points near the market median for better granularity
+        bids = np.linspace(min_bid, max_bid, num=num_bids)
+    else:
+        bids = [min_bid]
     
     return bids
 

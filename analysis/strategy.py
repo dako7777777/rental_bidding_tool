@@ -5,7 +5,7 @@ from algorithm.expectiminimax import expectiminimax
 from models.distributions import get_competitor_bid_distribution
 from models.payoff import calculate_fair_market_value, evaluate
 from models.market import classify_market_conditions
-from config.constants import TREE_DEPTH, PROPERTY_VALUE_WEIGHT, OVERPAYMENT_WEIGHT
+from config.constants import TREE_DEPTH, PROPERTY_VALUE_WEIGHT, OVERPAYMENT_WEIGHT, BUDGET_FLEXIBILITY
 
 
 def generate_three_strategies(base_state):
@@ -17,23 +17,29 @@ def generate_three_strategies(base_state):
     """
     strategies = {}
     
-    # Calculate proportional adjustments based on current risk tolerance
-    risk_adjustment_factor = 0.3  # 30% adjustment from base
+    # Create more differentiated strategies
+    # Map base risk tolerance to strategy-specific values
+    base_risk = base_state.risk_tolerance
     
     # Conservative: Lower risk tolerance, prioritize avoiding overpayment
     conservative_state = copy.deepcopy(base_state)
-    conservative_state.risk_tolerance = max(1, 
-        base_state.risk_tolerance * (1 - risk_adjustment_factor))
-    conservative_state.overpayment_weight = OVERPAYMENT_WEIGHT * 1.5
+    # Conservative maps to 1-2 risk level
+    conservative_state.risk_tolerance = max(1, base_risk - 1.5)
+    conservative_state.overpayment_weight = OVERPAYMENT_WEIGHT * 1.3  # More cautious about overpaying
+    conservative_state.property_value_weight = PROPERTY_VALUE_WEIGHT * 0.9  # Less aggressive about winning
     
-    # Balanced: Use original user preferences
-    balanced_state = base_state
+    # Balanced: Use original user preferences with slight adjustments
+    balanced_state = copy.deepcopy(base_state)
+    balanced_state.risk_tolerance = base_risk  # Keep original
+    balanced_state.overpayment_weight = OVERPAYMENT_WEIGHT  # Standard weights
+    balanced_state.property_value_weight = PROPERTY_VALUE_WEIGHT
     
     # Aggressive: Higher risk tolerance, prioritize winning
     aggressive_state = copy.deepcopy(base_state)
-    aggressive_state.risk_tolerance = min(5, 
-        base_state.risk_tolerance * (1 + risk_adjustment_factor))
-    aggressive_state.property_value_weight = PROPERTY_VALUE_WEIGHT * 1.3
+    # Aggressive maps to 4-5 risk level
+    aggressive_state.risk_tolerance = min(5, base_risk + 1.5)
+    aggressive_state.overpayment_weight = OVERPAYMENT_WEIGHT * 0.7  # Less concerned about overpaying
+    aggressive_state.property_value_weight = PROPERTY_VALUE_WEIGHT * 1.2  # Prioritize winning
     
     # Run expectiminimax for each strategy
     for strategy_name, state in [
@@ -44,23 +50,32 @@ def generate_three_strategies(base_state):
         # Use consistent tree depth
         value, bid = expectiminimax(state, TREE_DEPTH, -float('inf'), float('inf'), True)
         
-        # Ensure bid is within budget constraints
-        if bid and bid > state.max_budget:
-            bid = state.max_budget
+        # Calculate flexible budget
+        flexible_budget = state.max_budget * (1 + BUDGET_FLEXIBILITY)
+        
+        # Handle None bid (fallback to minimum viable bid)
+        if bid is None:
+            bid = min(0.85 * state.listing_price, flexible_budget)
+            state.user_bid = bid
+            value = evaluate(state)
+        
+        # Ensure bid is within flexible budget constraints
+        if bid > flexible_budget:
+            bid = flexible_budget
             # Recalculate value for budget-constrained bid
             state.user_bid = bid
             value = evaluate(state)
         
         # Calculate metrics
-        win_prob = calculate_win_probability(bid, state) if bid else 0
-        exp_overpay = calculate_expected_overpayment(bid, state) if bid else 0
+        win_prob = calculate_win_probability(bid, state)
+        exp_overpay = calculate_expected_overpayment(bid, state)
         
         strategies[strategy_name] = {
-            'bid': bid if bid else state.listing_price,
+            'bid': bid,
             'win_probability': win_prob,
             'expected_overpayment': exp_overpay,
             'strategy_description': get_strategy_description(
-                strategy_name, state, bid if bid else state.listing_price, win_prob
+                strategy_name, state, bid, win_prob
             ),
             'payoff_value': value
         }

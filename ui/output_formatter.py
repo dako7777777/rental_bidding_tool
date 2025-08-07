@@ -1,6 +1,7 @@
 """Output formatting for terminal display"""
 
 from models.market import classify_market_conditions
+from config.constants import BUDGET_FLEXIBILITY
 
 
 def display_recommendations(recommendations, round=1):
