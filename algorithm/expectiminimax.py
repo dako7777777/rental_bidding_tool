@@ -20,7 +20,12 @@ def expectiminimax(node, depth, alpha, beta, maximizing_player):
     Returns:
         tuple: (best_value, best_action)
     """
-    if depth == 0 or node.is_terminal():
+    if node.is_terminal():
+        return evaluate(node), None
+    
+    # For our rental bidding game, we always need at least one level of chance node evaluation
+    # So we only stop at depth=0 if we're in a maximizing node (user decision)
+    if depth == 0 and maximizing_player:
         return evaluate(node), None
     
     if maximizing_player:
@@ -49,36 +54,18 @@ def expectiminimax(node, depth, alpha, beta, maximizing_player):
     
     else:  # Chance node (competitor bids)
         expected_value = 0
-        bid_distribution = get_competitor_bid_distribution(node)
-        cumulative_prob = 0
+        competitor_dist = get_competitor_bid_distribution(node)
         
-        for competitor_bid, probability in bid_distribution:
+        for competitor_bid, probability in competitor_dist:
             if probability < PROBABILITY_THRESHOLD:
                 continue  # Prune low probability branches
             
             # Apply competitor bid to determine win/loss
             child = apply_competitor_bid(node, competitor_bid)
             
-            # For simple 2-player game against field, evaluate directly at terminal
-            # This is appropriate since win/loss is determined here
-            if depth <= 1 or child.won_property is not None:
-                eval_score = evaluate(child)
-            else:
-                # Continue tree exploration if more depth available
-                eval_score, _ = expectiminimax(child, depth-1, alpha, beta, True)
-            
+            # Evaluate the resulting state
+            eval_score = evaluate(child)
             expected_value += probability * eval_score
-            cumulative_prob += probability
-            
-            # Probabilistic pruning
-            remaining_prob = 1 - cumulative_prob
-            max_possible_score = 1.0  # Maximum payoff
-            min_possible_score = -1.0  # Minimum payoff
-            
-            if expected_value + remaining_prob * max_possible_score < alpha:
-                break
-            if expected_value + remaining_prob * min_possible_score > beta:
-                break
         
         return expected_value, None
 
@@ -103,15 +90,26 @@ def get_possible_bids(state):
     # Classify market conditions
     market_condition = classify_market_conditions(state.market_params)
     
-    # Adjust bid range based on risk tolerance
-    # Risk tolerance 1-5 maps to different strategy levels
-    risk_levels = {
-        1: {'center_offset': -0.06, 'range': 0.08},  # Very conservative: 90-98% of listing
-        2: {'center_offset': -0.04, 'range': 0.08},  # Conservative: 92-100% of listing
-        3: {'center_offset': -0.02, 'range': 0.10},  # Balanced: 94-104% of listing
-        4: {'center_offset': 0.00, 'range': 0.10},   # Aggressive: 96-106% of listing
-        5: {'center_offset': 0.02, 'range': 0.12}    # Very aggressive: 98-110% of listing
-    }
+    # Adjust bid range based on risk tolerance and market conditions
+    # Updated ranges for cooling market reality
+    if market_condition in ['cooling', 'very_cool']:
+        # Cooling market: wider ranges to capture realistic win probabilities
+        risk_levels = {
+            1: {'center_offset': -0.06, 'range': 0.12},  # Very conservative: 86-98% of listing
+            2: {'center_offset': -0.04, 'range': 0.14},  # Conservative: 88-102% of listing
+            3: {'center_offset': -0.02, 'range': 0.16},  # Balanced: 90-106% of listing
+            4: {'center_offset': 0.00, 'range': 0.18},   # Aggressive: 91-109% of listing
+            5: {'center_offset': 0.02, 'range': 0.20}    # Very aggressive: 92-112% of listing
+        }
+    else:
+        # Hot/balanced market: higher bid ranges
+        risk_levels = {
+            1: {'center_offset': -0.02, 'range': 0.12},  # Very conservative: 90-102% of listing
+            2: {'center_offset': 0.00, 'range': 0.14},   # Conservative: 93-107% of listing
+            3: {'center_offset': 0.02, 'range': 0.16},   # Balanced: 94-110% of listing
+            4: {'center_offset': 0.04, 'range': 0.18},   # Aggressive: 95-113% of listing
+            5: {'center_offset': 0.06, 'range': 0.20}    # Very aggressive: 96-116% of listing
+        }
     
     risk_level = int(state.risk_tolerance)
     risk_params = risk_levels.get(risk_level, risk_levels[3])  # Default to balanced
@@ -127,10 +125,6 @@ def get_possible_bids(state):
     # Convert to actual dollar amounts
     min_bid = max(min_ratio * listing_price, 0.85 * listing_price)  # Never go below 85%
     max_bid = min(max_ratio * listing_price, flexible_budget)  # Respect flexible budget
-    
-    # In cooling markets, extend the lower range for conservative strategies
-    if market_condition in ['cooling', 'very_cool'] and risk_level <= 2:
-        min_bid = max(0.88 * listing_price, min_bid - 0.02 * listing_price)
     
     # Ensure min doesn't exceed max
     if min_bid >= max_bid:
@@ -163,5 +157,8 @@ def apply_competitor_bid(state, competitor_bid):
         new_state.won_property = True
     else:
         new_state.won_property = False
+    
+    # Mark outcome as determined
+    new_state.outcome_determined = True
     
     return new_state 

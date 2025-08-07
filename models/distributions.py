@@ -25,11 +25,11 @@ def get_competitor_bid_distribution(state):
     skew = params['skew']
     
     # Map competitive_level to number of competitors
-    # Use weighted average for uncertain counts
+    # Updated for more realistic cooling market competition
     num_competitors_map = {
         1: 1,      # Low competition: 1 other bidder
-        2: 2.5,    # Medium: 2-3 bidders (handled specially)
-        3: 5       # High: 4-6 bidders
+        2: 2,      # Medium: 2 bidders (reduced from 2.5)
+        3: 3       # High: 3 bidders (reduced from 5)
     }
     comp_level = state.competitive_level
     
@@ -39,18 +39,11 @@ def get_competitor_bid_distribution(state):
         classify_market_conditions(state.market_params)
     )
     
-    # Calculate probabilities
-    if comp_level == 2:
-        # Special handling for fractional competitors
-        # Compute weighted average of 2 and 3 competitor scenarios
-        probs_2 = calculate_order_statistics(bid_range, median, sigma, skew, 2)
-        probs_3 = calculate_order_statistics(bid_range, median, sigma, skew, 3)
-        probabilities = [0.5 * p2 + 0.5 * p3 for p2, p3 in zip(probs_2, probs_3)]
-    else:
-        num_competitors = num_competitors_map[comp_level]
-        probabilities = calculate_order_statistics(
-            bid_range, median, sigma, skew, num_competitors
-        )
+    # Calculate probabilities - simplified, no fractional competitors
+    num_competitors = num_competitors_map[comp_level]
+    probabilities = calculate_order_statistics(
+        bid_range, median, sigma, skew, num_competitors
+    )
     
     # Normalize and return
     total = sum(probabilities)

@@ -25,6 +25,7 @@ class GameState:
     # Decision variables
     user_bid: float = None
     won_property: bool = False
+    outcome_determined: bool = False  # Track if win/loss has been determined
     
     # For round 2
     previous_bid: float = None
@@ -70,5 +71,5 @@ class GameState:
     
     def is_terminal(self):
         """Check if this is a terminal state"""
-        # Terminal if bid has been made and evaluated
-        return self.user_bid is not None 
+        # Terminal if bid has been made and outcome determined
+        return self.user_bid is not None and self.outcome_determined 

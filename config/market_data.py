@@ -4,9 +4,9 @@
 DOWNTOWN_MARKET_DATA = {
     'distribution_type': 'log_normal',
     'parameters': {
-        'median': 0.98,      # Median bid slightly below listing (reflects cooling market)
-        'sigma': 0.06,       # Lower spread due to less competition
-        'skew': 0.2,         # Minimal positive skew (fewer extreme overbids)
+        'median': 0.94,      # Reduced from 0.98 - tenants expect discounts in cooling market
+        'sigma': 0.05,       # Reduced spread - less variation in cooling market
+        'skew': 0.1,         # Reduced skew - fewer people overbid in cooling market
     }
 }
 
@@ -14,9 +14,9 @@ DOWNTOWN_MARKET_DATA = {
 BURNABY_MARKET_DATA = {
     'distribution_type': 'log_normal',
     'parameters': {
-        'median': 0.96,      # Lower median reflects steeper price declines
-        'sigma': 0.07,       # Slightly higher spread due to varied neighborhood conditions
-        'skew': 0.15,        # Lower skew (even fewer overbids)
+        'median': 0.92,      # Reduced from 0.96 - stronger cooling effect
+        'sigma': 0.06,       # Slightly reduced spread
+        'skew': 0.05,        # Minimal skew - almost no overbids in cooling market
     }
 }
 
