@@ -236,24 +236,31 @@ def get_possible_bids(state):
     if market_condition in ['cooling', 'very_cool']:
         # Cooling market: wider ranges to capture realistic win probabilities
         risk_levels = {
-            1: {'center_offset': -0.06, 'range': 0.12},  # Very conservative: 86-98% of listing
-            2: {'center_offset': -0.04, 'range': 0.14},  # Conservative: 88-102% of listing
+            1: {'center_offset': -0.08, 'range': 0.10},  # Very conservative: 84-94% of listing
+            1.5: {'center_offset': -0.06, 'range': 0.12},  # Conservative: 86-98% of listing
+            2: {'center_offset': -0.04, 'range': 0.14},  # Somewhat conservative: 88-102% of listing
             3: {'center_offset': -0.02, 'range': 0.16},  # Balanced: 90-106% of listing
-            4: {'center_offset': 0.00, 'range': 0.18},   # Aggressive: 91-109% of listing
-            5: {'center_offset': 0.02, 'range': 0.20}    # Very aggressive: 92-112% of listing
+            4: {'center_offset': 0.00, 'range': 0.18},   # Somewhat aggressive: 91-109% of listing
+            4.5: {'center_offset': 0.02, 'range': 0.20},  # Aggressive: 92-112% of listing
+            5: {'center_offset': 0.04, 'range': 0.22}    # Very aggressive: 93-115% of listing
         }
     else:
         # Hot/balanced market: higher bid ranges
         risk_levels = {
-            1: {'center_offset': -0.02, 'range': 0.12},  # Very conservative: 90-102% of listing
-            2: {'center_offset': 0.00, 'range': 0.14},   # Conservative: 93-107% of listing
+            1: {'center_offset': -0.04, 'range': 0.10},  # Very conservative: 88-98% of listing
+            1.5: {'center_offset': -0.02, 'range': 0.12},  # Conservative: 90-102% of listing
+            2: {'center_offset': 0.00, 'range': 0.14},   # Somewhat conservative: 93-107% of listing
             3: {'center_offset': 0.02, 'range': 0.16},   # Balanced: 94-110% of listing
-            4: {'center_offset': 0.04, 'range': 0.18},   # Aggressive: 95-113% of listing
-            5: {'center_offset': 0.06, 'range': 0.20}    # Very aggressive: 96-116% of listing
+            4: {'center_offset': 0.04, 'range': 0.18},   # Somewhat aggressive: 95-113% of listing
+            4.5: {'center_offset': 0.06, 'range': 0.20},  # Aggressive: 96-116% of listing
+            5: {'center_offset': 0.08, 'range': 0.22}    # Very aggressive: 97-119% of listing
         }
     
-    risk_level = int(state.risk_tolerance)
-    risk_params = risk_levels.get(risk_level, risk_levels[3])  # Default to balanced
+    risk_level = state.risk_tolerance  # Now can be float
+    # Find closest risk level
+    available_levels = sorted(risk_levels.keys())
+    closest_level = min(available_levels, key=lambda x: abs(x - risk_level))
+    risk_params = risk_levels[closest_level]
     
     # Center the bid range around market median, adjusted for risk
     center_ratio = market_median_ratio + risk_params['center_offset']

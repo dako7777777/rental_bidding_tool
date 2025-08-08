@@ -15,30 +15,33 @@ def generate_three_strategies(base_state):
     """
     strategies = {}
     
-    # Calculate proportional adjustments
-    risk_adjustment_factor = 0.3
-    
-    # Conservative: Aims to avoid negotiation rounds
+    # More aggressive differentiation between strategies
+    # Conservative: Aims to save money, lower bids
     conservative_state = copy.deepcopy(base_state)
-    conservative_state.risk_tolerance = max(1, 
-        base_state.risk_tolerance * (1 - risk_adjustment_factor))
-    conservative_state.negotiation_cost = 0.1  # Higher penalty for multiple rounds
-    conservative_state.overpayment_weight = OVERPAYMENT_WEIGHT * 1.3
-    conservative_state.property_value_weight = PROPERTY_VALUE_WEIGHT * 0.9
+    conservative_state.risk_tolerance = 1.5  # Force conservative behavior
+    conservative_state.negotiation_cost = 0.15  # High penalty for multiple rounds
+    conservative_state.overpayment_weight = OVERPAYMENT_WEIGHT * 1.5  # Very sensitive to overpaying
+    conservative_state.property_value_weight = PROPERTY_VALUE_WEIGHT * 0.7  # Less weight on winning
     
     # Balanced: Standard preferences
     balanced_state = copy.deepcopy(base_state)
+    balanced_state.risk_tolerance = base_state.risk_tolerance  # Use actual user preference
     balanced_state.negotiation_cost = 0.05  # Moderate penalty
     balanced_state.overpayment_weight = OVERPAYMENT_WEIGHT
     balanced_state.property_value_weight = PROPERTY_VALUE_WEIGHT
     
-    # Aggressive: Willing to go through negotiation
+    # Aggressive: Prioritize winning over value
     aggressive_state = copy.deepcopy(base_state)
-    aggressive_state.risk_tolerance = min(5,
-        base_state.risk_tolerance * (1 + risk_adjustment_factor))
-    aggressive_state.negotiation_cost = 0.02  # Lower penalty for multiple rounds
-    aggressive_state.overpayment_weight = OVERPAYMENT_WEIGHT * 0.7
-    aggressive_state.property_value_weight = PROPERTY_VALUE_WEIGHT * 1.2
+    aggressive_state.risk_tolerance = 4.5  # Force aggressive behavior
+    aggressive_state.negotiation_cost = 0.01  # Very low penalty for multiple rounds
+    aggressive_state.overpayment_weight = OVERPAYMENT_WEIGHT * 0.5  # Less sensitive to overpaying
+    aggressive_state.property_value_weight = PROPERTY_VALUE_WEIGHT * 1.3  # Prioritize winning
+    
+    # For Round 3, adjust strategies differently
+    if base_state.round == 3:
+        # In final round, strategies should diverge more
+        conservative_state.risk_tolerance = 1  # Very conservative in final round
+        aggressive_state.risk_tolerance = 5  # Very aggressive in final round
     
     for strategy_name, state in [
         ('conservative', conservative_state),
@@ -52,7 +55,22 @@ def generate_three_strategies(base_state):
         
         # Handle None bid (fallback)
         if bid is None:
-            bid = min(0.85 * state.listing_price, state.max_budget)
+            if strategy_name == 'conservative':
+                bid = min(0.90 * state.listing_price, state.max_budget)
+            elif strategy_name == 'balanced':
+                bid = min(0.98 * state.listing_price, state.max_budget)
+            else:  # aggressive
+                bid = min(1.05 * state.listing_price, state.max_budget)
+        
+        # Ensure strategies are differentiated
+        # If bids are too similar, force differentiation
+        if 'conservative' in strategies and abs(bid - strategies['conservative']['bid']) < 20:
+            if strategy_name == 'balanced':
+                bid = min(bid + 30, state.max_budget * (1 + BUDGET_FLEXIBILITY))
+            elif strategy_name == 'aggressive':
+                bid = min(bid + 60, state.max_budget * (1 + BUDGET_FLEXIBILITY))
+        elif 'balanced' in strategies and strategy_name == 'aggressive' and abs(bid - strategies['balanced']['bid']) < 20:
+            bid = min(bid + 40, state.max_budget * (1 + BUDGET_FLEXIBILITY))
         
         # Calculate metrics including landlord response probability
         win_prob = calculate_win_probability_with_landlord(bid, state)
@@ -70,6 +88,16 @@ def generate_three_strategies(base_state):
             ),
             'payoff_value': value
         }
+    
+    # Final check: ensure balanced has best expected value
+    # If not, swap recommendations
+    if strategies['conservative']['payoff_value'] > strategies['balanced']['payoff_value']:
+        # Conservative is actually better - likely in very cool market
+        # Keep the strategies but update descriptions
+        strategies['conservative']['strategy_description'] += " (Best value in this market)"
+    elif strategies['aggressive']['payoff_value'] > strategies['balanced']['payoff_value']:
+        # Aggressive is actually better - likely in hot market
+        strategies['aggressive']['strategy_description'] += " (Best choice in competitive market)"
     
     return strategies
 
@@ -167,8 +195,8 @@ def get_strategy_description(strategy_name, state, bid, win_prob, landlord_respo
     # Base descriptions
     base_descriptions = {
         'conservative': {
-            'very_cool': f"Bid at {bid_ratio:.1%} of listing. Strong negotiating position in buyer's market.",
-            'cooling': f"Bid at {bid_ratio:.1%} of listing to leverage market conditions while showing interest.",
+            'very_cool': f"Cautious bid at {bid_ratio:.1%} of listing. Prioritizes value over winning.",
+            'cooling': f"Value-focused bid at {bid_ratio:.1%} of listing to maximize savings.",
             'balanced': f"Modest bid at {bid_ratio:.1%} of listing, accepting lower win probability for value.",
             'very_hot': f"Careful bid at {bid_ratio:.1%} of listing, may need to be flexible in hot market."
         },
@@ -179,7 +207,7 @@ def get_strategy_description(strategy_name, state, bid, win_prob, landlord_respo
             'very_hot': f"Competitive bid at {bid_ratio:.1%} of listing to stay in contention."
         },
         'aggressive': {
-            'very_cool': f"Strong bid at {bid_ratio:.1%} of listing to secure property despite market advantage.",
+            'very_cool': f"Strong bid at {bid_ratio:.1%} of listing to guarantee property despite market advantage.",
             'cooling': f"Above-market bid at {bid_ratio:.1%} of listing for {win_prob:.0%} win probability.",
             'balanced': f"Premium bid at {bid_ratio:.1%} of listing to maximize success chances.",
             'very_hot': f"Maximum competitive bid at {bid_ratio:.1%} of listing in seller's market."
