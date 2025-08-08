@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Rental Bidding Strategy Tool
+Enhanced Rental Bidding Strategy Tool with Three-Player Game
 Main entry point for terminal-based rental bidding advisor
 """
 
@@ -14,10 +14,15 @@ from ui.terminal_ui import (
     collect_user_preferences,
     collect_rental_situation,
     prompt_continue_negotiation,
-    handle_round_2
+    handle_round_3,
+    display_example_scenario
 )
 from ui.input_validator import InputValidator
-from ui.output_formatter import display_recommendations, display_market_analysis
+from ui.output_formatter import (
+    display_recommendations_with_landlord, 
+    display_market_analysis,
+    display_detailed_explanation
+)
 
 
 def create_game_state(user_prefs, rental_situation, market_data):
@@ -29,9 +34,7 @@ def create_game_state(user_prefs, rental_situation, market_data):
         property_value_weight=PROPERTY_VALUE_WEIGHT,
         overpayment_weight=OVERPAYMENT_WEIGHT,
         round=1,
-        risk_tolerance=user_prefs['risk_tolerance'],
-        user_bid=None,
-        won_property=False
+        risk_tolerance=user_prefs['risk_tolerance']
     )
 
 
@@ -39,9 +42,16 @@ def main():
     """Main terminal interaction loop"""
     print("=" * 60)
     print(" " * 10 + "RENTAL BIDDING STRATEGY TOOL")
-    print(" " * 8 + "Expectiminimax Algorithm Advisor")
+    print(" " * 5 + "Three-Player Game Theory Advisor")
+    print(" " * 8 + "(Tenant vs Competitors vs Landlord)")
     print("=" * 60)
     print()
+    
+    # Show example scenario
+    show_example = input("Would you like to see an example scenario? (y/n): ").lower()
+    if show_example == 'y':
+        display_example_scenario()
+        input("\nPress Enter to continue...")
     
     try:
         # Select market (Downtown Vancouver or Burnaby)
@@ -85,30 +95,38 @@ def main():
         
         # Generate recommendations
         print("\nAnalyzing optimal bidding strategy...")
-        print(f"Market condition: {classify_market_conditions(market_data).replace('_', ' ').title()}")
+        print("Modeling tenant-competitor-landlord interactions...")
         recommendations = generate_three_strategies(game_state)
         
-        # Display recommendations
-        display_recommendations(recommendations, round=1)
+        # Display recommendations with landlord predictions
+        display_recommendations_with_landlord(recommendations, round=1)
         
-        # Optional Round 2
+        # Show detailed explanation if desired
+        show_details = input("\nWould you like a detailed explanation? (y/n): ").lower()
+        if show_details == 'y':
+            display_detailed_explanation(recommendations, market_data, rental_situation)
+        
+        # Optional Round 3 (after landlord response)
         if prompt_continue_negotiation():
-            round2_outcome = handle_round_2(game_state, market_data)
-            if round2_outcome:
-                display_recommendations(round2_outcome, round=2)
+            round3_outcome = handle_round_3(game_state, market_data)
+            if round3_outcome:
+                display_recommendations_with_landlord(round3_outcome, round=3)
         
         print("\n" + "=" * 60)
         print("Good luck with your rental application!")
         print("Remember: These are algorithmic suggestions based on")
-        print("market models. Always consider your personal circumstances.")
+        print("game theory and market models. The landlord's actual")
+        print("behavior may vary. Always consider your circumstances.")
         print("=" * 60)
         
     except KeyboardInterrupt:
         print("\n\nExiting... Good luck with your rental search!")
     except Exception as e:
         print(f"\nAn error occurred: {e}")
+        import traceback
+        traceback.print_exc()
         print("Please check your inputs and try again.")
 
 
 if __name__ == "__main__":
-    main() 
+    main()

@@ -1,81 +1,72 @@
-"""Strategy generation logic for rental bidding"""
+"""Enhanced strategy generation for three-player rental bidding"""
 
 import copy
-from algorithm.expectiminimax import expectiminimax
+from algorithm.expectiminimax_landlord import expectiminimax_with_landlord
+from algorithm.landlord_model import LandlordProfile
 from models.distributions import get_competitor_bid_distribution
-from models.payoff import calculate_fair_market_value, evaluate
+from models.payoff import calculate_fair_market_value
 from models.market import classify_market_conditions
 from config.constants import TREE_DEPTH, PROPERTY_VALUE_WEIGHT, OVERPAYMENT_WEIGHT, BUDGET_FLEXIBILITY
 
 
 def generate_three_strategies(base_state):
     """
-    Generate aggressive, balanced, and conservative strategies
-    
-    Returns:
-        dict: Three strategy recommendations
+    Generate three strategies accounting for landlord's strategic behavior
     """
     strategies = {}
     
-    # Create more differentiated strategies
-    # Map base risk tolerance to strategy-specific values
-    base_risk = base_state.risk_tolerance
+    # Calculate proportional adjustments
+    risk_adjustment_factor = 0.3
     
-    # Conservative: Lower risk tolerance, prioritize avoiding overpayment
+    # Conservative: Aims to avoid negotiation rounds
     conservative_state = copy.deepcopy(base_state)
-    # Conservative maps to 1-2 risk level
-    conservative_state.risk_tolerance = max(1, base_risk - 1.5)
-    conservative_state.overpayment_weight = OVERPAYMENT_WEIGHT * 1.3  # More cautious about overpaying
-    conservative_state.property_value_weight = PROPERTY_VALUE_WEIGHT * 0.9  # Less aggressive about winning
+    conservative_state.risk_tolerance = max(1, 
+        base_state.risk_tolerance * (1 - risk_adjustment_factor))
+    conservative_state.negotiation_cost = 0.1  # Higher penalty for multiple rounds
+    conservative_state.overpayment_weight = OVERPAYMENT_WEIGHT * 1.3
+    conservative_state.property_value_weight = PROPERTY_VALUE_WEIGHT * 0.9
     
-    # Balanced: Use original user preferences with slight adjustments
+    # Balanced: Standard preferences
     balanced_state = copy.deepcopy(base_state)
-    balanced_state.risk_tolerance = base_risk  # Keep original
-    balanced_state.overpayment_weight = OVERPAYMENT_WEIGHT  # Standard weights
+    balanced_state.negotiation_cost = 0.05  # Moderate penalty
+    balanced_state.overpayment_weight = OVERPAYMENT_WEIGHT
     balanced_state.property_value_weight = PROPERTY_VALUE_WEIGHT
     
-    # Aggressive: Higher risk tolerance, prioritize winning
+    # Aggressive: Willing to go through negotiation
     aggressive_state = copy.deepcopy(base_state)
-    # Aggressive maps to 4-5 risk level
-    aggressive_state.risk_tolerance = min(5, base_risk + 1.5)
-    aggressive_state.overpayment_weight = OVERPAYMENT_WEIGHT * 0.7  # Less concerned about overpaying
-    aggressive_state.property_value_weight = PROPERTY_VALUE_WEIGHT * 1.2  # Prioritize winning
+    aggressive_state.risk_tolerance = min(5,
+        base_state.risk_tolerance * (1 + risk_adjustment_factor))
+    aggressive_state.negotiation_cost = 0.02  # Lower penalty for multiple rounds
+    aggressive_state.overpayment_weight = OVERPAYMENT_WEIGHT * 0.7
+    aggressive_state.property_value_weight = PROPERTY_VALUE_WEIGHT * 1.2
     
-    # Run expectiminimax for each strategy
     for strategy_name, state in [
         ('conservative', conservative_state),
         ('balanced', balanced_state),
         ('aggressive', aggressive_state)
     ]:
-        # Use consistent tree depth
-        value, bid = expectiminimax(state, TREE_DEPTH, -float('inf'), float('inf'), True)
+        # Run enhanced expectiminimax
+        value, bid = expectiminimax_with_landlord(
+            state, TREE_DEPTH, -float('inf'), float('inf'), 'tenant_max'
+        )
         
-        # Calculate flexible budget
-        flexible_budget = state.max_budget * (1 + BUDGET_FLEXIBILITY)
-        
-        # Handle None bid (fallback to minimum viable bid)
+        # Handle None bid (fallback)
         if bid is None:
-            bid = min(0.85 * state.listing_price, flexible_budget)
-            state.user_bid = bid
-            value = evaluate(state)
+            bid = min(0.85 * state.listing_price, state.max_budget)
         
-        # Ensure bid is within flexible budget constraints
-        if bid > flexible_budget:
-            bid = flexible_budget
-            # Recalculate value for budget-constrained bid
-            state.user_bid = bid
-            value = evaluate(state)
-        
-        # Calculate metrics
-        win_prob = calculate_win_probability(bid, state)
+        # Calculate metrics including landlord response probability
+        win_prob = calculate_win_probability_with_landlord(bid, state)
         exp_overpay = calculate_expected_overpayment(bid, state)
+        landlord_response = predict_landlord_response(bid, state)
         
         strategies[strategy_name] = {
             'bid': bid,
             'win_probability': win_prob,
             'expected_overpayment': exp_overpay,
+            'likely_landlord_response': landlord_response,
+            'requires_negotiation': landlord_response['type'] != 'accept',
             'strategy_description': get_strategy_description(
-                strategy_name, state, bid, win_prob
+                strategy_name, state, bid, win_prob, landlord_response
             ),
             'payoff_value': value
         }
@@ -83,13 +74,71 @@ def generate_three_strategies(base_state):
     return strategies
 
 
-def calculate_win_probability(bid, state):
+def calculate_win_probability_with_landlord(bid, state):
     """
-    Calculate probability of winning with given bid
+    Calculate win probability considering both competitor bids and landlord decisions
     """
+    # First, probability of having highest bid
     competitor_dist = get_competitor_bid_distribution(state)
-    win_prob = sum(prob for comp_bid, prob in competitor_dist if bid > comp_bid)
-    return win_prob
+    prob_highest = sum(prob for comp_bid, prob in competitor_dist if bid >= comp_bid)
+    
+    # Then, probability landlord accepts given you have highest bid
+    landlord_profile = LandlordProfile(
+        state.days_on_market,
+        classify_market_conditions(state.market_params),
+        state.rental_situation.get('price_sens_landlord', 2)
+    )
+    
+    bid_ratio = bid / state.listing_price
+    if bid_ratio >= landlord_profile.acceptance_threshold:
+        prob_accept = 0.95
+    elif bid_ratio >= landlord_profile.acceptance_threshold - 0.05:
+        prob_accept = 0.70
+    elif bid_ratio >= landlord_profile.rejection_threshold:
+        prob_accept = 0.40
+    else:
+        prob_accept = 0.10
+    
+    # Combined probability
+    return prob_highest * prob_accept
+
+
+def predict_landlord_response(bid, state):
+    """
+    Predict most likely landlord response to a bid
+    """
+    landlord_profile = LandlordProfile(
+        state.days_on_market,
+        classify_market_conditions(state.market_params),
+        state.rental_situation.get('price_sens_landlord', 2)
+    )
+    
+    bid_ratio = bid / state.listing_price
+    
+    if bid_ratio >= landlord_profile.acceptance_threshold:
+        return {
+            'type': 'accept',
+            'probability': 0.9,
+            'message': 'Likely immediate acceptance'
+        }
+    elif bid_ratio >= 1.0:  # At or above asking
+        return {
+            'type': 'request_best_final',
+            'probability': 0.6,
+            'message': 'May request best and final offers'
+        }
+    elif bid_ratio >= landlord_profile.rejection_threshold:
+        return {
+            'type': 'counter_offer', 
+            'probability': 0.7,
+            'message': f'Likely counter at ${state.listing_price:,.0f}'
+        }
+    else:
+        return {
+            'type': 'reject',
+            'probability': 0.8,
+            'message': 'Risk of rejection - bid may be too low'
+        }
 
 
 def calculate_expected_overpayment(bid, state):
@@ -108,14 +157,15 @@ def calculate_expected_overpayment(bid, state):
     return overpayment
 
 
-def get_strategy_description(strategy_name, state, bid, win_prob):
+def get_strategy_description(strategy_name, state, bid, win_prob, landlord_response):
     """
-    Generate strategy description based on market conditions and bid details
+    Generate enhanced strategy description including landlord response
     """
     market_condition = classify_market_conditions(state.market_params)
     bid_ratio = bid / state.listing_price
     
-    descriptions = {
+    # Base descriptions
+    base_descriptions = {
         'conservative': {
             'very_cool': f"Bid at {bid_ratio:.1%} of listing. Strong negotiating position in buyer's market.",
             'cooling': f"Bid at {bid_ratio:.1%} of listing to leverage market conditions while showing interest.",
@@ -136,4 +186,14 @@ def get_strategy_description(strategy_name, state, bid, win_prob):
         }
     }
     
-    return descriptions[strategy_name][market_condition] 
+    description = base_descriptions[strategy_name][market_condition]
+    
+    # Add landlord response info
+    if landlord_response['type'] == 'accept':
+        description += " Landlord likely to accept immediately."
+    elif landlord_response['type'] == 'counter_offer':
+        description += " Expect negotiation rounds."
+    elif landlord_response['type'] == 'request_best_final':
+        description += " May trigger bidding competition."
+    
+    return description

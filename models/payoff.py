@@ -1,50 +1,118 @@
-"""Payoff calculations for rental bidding decisions"""
+"""Enhanced payoff calculations for three-player rental bidding"""
 
 from models.market import classify_market_conditions
 
 
 def evaluate(state):
     """
-    Evaluate the game state from user's perspective
+    Enhanced evaluation considering three-player dynamics
     
     Returns:
         float: Normalized payoff value between -1 and 1
     """
-    if not state.won_property:
-        # Increase losing penalty to encourage competitive bidding
-        # Penalty scales with property value (how much you want it)
-        base_penalty = -0.4  # Base penalty for losing
-        property_value_factor = state.property_value / 5.0  # 0.2 to 1.0
-        return base_penalty * (1 + property_value_factor * 0.5)  # -0.44 to -0.6 for high value properties
+    # Terminal states after landlord decision
+    if hasattr(state, 'landlord_final_decision') and state.landlord_final_decision:
+        if state.landlord_final_decision == 'accept_tenant':
+            # You won - calculate payoff
+            fair_value = calculate_fair_market_value(
+                state.listing_price,
+                state.neighborhood_avg, 
+                state.days_on_market,
+                state.market_params
+            )
+            
+            overpayment = state.user_bid - fair_value
+            overpayment_ratio = overpayment / state.listing_price
+            
+            # Base payoff
+            normalized_property_value = state.property_value / 5.0
+            base_payoff = normalized_property_value - (overpayment_ratio * 2.0 * state.overpayment_weight)
+            
+            # Bonus for winning in competitive market
+            competition_bonus = 0.1 * state.competitive_level / 3.0
+            
+            # Penalty for multiple rounds (time cost)
+            round_penalty = state.negotiation_cost * (state.round - 1)
+            
+            # Risk adjustment
+            risk_factor = (state.risk_tolerance - 3) / 10.0
+            
+            final_payoff = (base_payoff + competition_bonus - round_penalty) * (1 + risk_factor)
+            
+            return max(-1.0, min(1.0, final_payoff))
+        
+        elif state.landlord_final_decision == 'accept_competitor':
+            # You lost to competitor
+            opportunity_cost = -0.5 * (state.property_value / 5.0)
+            
+            # Small bonus if you forced competitor to pay more
+            if hasattr(state, 'competitor_increase_forced') and state.competitor_increase_forced:
+                opportunity_cost += 0.1
+            
+            return opportunity_cost
+        
+        elif state.landlord_final_decision == 'reject_all':
+            # Everyone lost - minor penalty
+            return -0.2
     
-    # Calculate fair market value aligned with market data
-    fair_market_value = calculate_fair_market_value(
-        state.listing_price, 
-        state.neighborhood_avg,
+    # Non-terminal evaluation (for pruning decisions)
+    return heuristic_evaluation(state)
+
+
+def heuristic_evaluation(state):
+    """
+    Heuristic evaluation for non-terminal states
+    Used for move ordering and pruning
+    """
+    if not state.user_bid:
+        return 0  # No bid yet
+        
+    # Estimate probability of winning
+    if state.highest_competitor_bid:
+        if state.user_bid > state.highest_competitor_bid:
+            win_prob = 0.7
+        elif state.user_bid == state.highest_competitor_bid:
+            win_prob = 0.5
+        else:
+            win_prob = 0.3
+    else:
+        # No competitor bid yet - estimate based on market
+        from models.distributions import get_competitor_bid_distribution
+        competitor_dist = get_competitor_bid_distribution(state)
+        win_prob = sum(prob for comp_bid, prob in competitor_dist if state.user_bid > comp_bid)
+    
+    # Adjust for landlord's likely response
+    bid_ratio = state.user_bid / state.listing_price
+    from algorithm.landlord_model import LandlordProfile
+    
+    landlord_profile = LandlordProfile(
         state.days_on_market,
-        state.market_params
+        classify_market_conditions(state.market_params),
+        state.rental_situation.get('price_sens_landlord', 2)
     )
     
-    # Calculate normalized overpayment
-    overpayment = state.user_bid - fair_market_value
-    overpayment_ratio = overpayment / state.listing_price
+    if bid_ratio >= landlord_profile.acceptance_threshold:
+        win_prob *= 1.2  # Likely immediate acceptance
+    elif bid_ratio < landlord_profile.rejection_threshold:
+        win_prob *= 0.3  # Likely rejection
     
-    # Normalize property value to 0-1 scale
-    normalized_property_value = state.property_value / 5.0
+    # Expected value calculation
+    if win_prob > 0:
+        fair_value = calculate_fair_market_value(
+            state.listing_price,
+            state.neighborhood_avg,
+            state.days_on_market,
+            state.market_params
+        )
+        overpayment = state.user_bid - fair_value
+        overpayment_penalty = (overpayment / state.listing_price) * 2.0
+        property_value = state.property_value / 5.0
+        
+        expected_value = win_prob * (property_value - overpayment_penalty)
+    else:
+        expected_value = -0.5 * (state.property_value / 5.0)
     
-    # Calculate base payoff with weighted components
-    # Use the overpayment_weight from state (which can be adjusted per strategy)
-    overpayment_penalty = overpayment_ratio * 2.0 * state.overpayment_weight
-    property_benefit = normalized_property_value * state.property_value_weight
-    
-    base_payoff = property_benefit - overpayment_penalty
-    
-    # Apply risk adjustment
-    risk_factor = (state.risk_tolerance - 3) / 10.0  # -0.2 to +0.2
-    risk_adjusted_payoff = base_payoff * (1 + risk_factor)
-    
-    # Ensure payoff stays within bounds
-    return max(-1.0, min(1.0, risk_adjusted_payoff))
+    return max(-1.0, min(1.0, expected_value))
 
 
 def calculate_fair_market_value(listing_price, neighborhood_avg, days_on_market, market_params):
@@ -99,4 +167,4 @@ def get_staleness_discount(days_on_market, market_condition):
             return discount
     
     # If no threshold matched, return default
-    return rates['default'] 
+    return rates['default']
